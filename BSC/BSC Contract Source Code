@@ -1,5 +1,9 @@
 /**
- *Submitted for verification at BscScan.com on 2021-08-23
+ *Submitted for verification at BscScan.com on 2021-11-17
+*/
+
+/**
+ *Submitted for verification at BscScan.com on 2021-08-12
 */
 
 // SPDX-License-Identifier: MIT
@@ -1309,7 +1313,7 @@ contract Token is Context, IERC20, Ownable {
         emit Transfer(sender, recipient, tTransferAmount);
     }
 
-    function _tokenTransferNoFee(address sender, address recipient, uint256 amount) private {        
+    function _tokenTransferNoFee(address sender, address recipient, uint256 amount) private {
         uint256 currentRate =  _getRate();  
         uint256 rAmount = amount.mul(currentRate);   
 
