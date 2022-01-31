@@ -782,8 +782,8 @@ contract BotToken is Context, IERC20, Ownable {
         walletFee = 0; // 0%
         buybackFee = 1; // 1%
 		
-		_buyBackUpperLimit = 10 * 10**_decimals;
-		_buyBackMinLimit = 10 * 10**_decimals;
+        _buyBackUpperLimit = 10 * 10**_decimals;
+        _buyBackMinLimit = 10 * 10**_decimals;
 
         swapAndLiquifyEnabled = true;
         // Initialization. End
