@@ -745,7 +745,30 @@ interface IMimoV2Router02 is IMimoV2Router01 {
     ) external;
 }
 
-contract BotToken is Context, IERC20, Ownable {
+// OpenZeppelin Contracts v4.4.1 (token/ERC20/extensions/IERC20Metadata.sol)
+/**
+ * @dev Interface for the optional metadata functions from the ERC20 standard.
+ *
+ * _Available since v4.1._
+ */
+interface IERC20Metadata is IERC20 {
+    /**
+     * @dev Returns the name of the token.
+     */
+    function name() external view returns (string memory);
+
+    /**
+     * @dev Returns the symbol of the token.
+     */
+    function symbol() external view returns (string memory);
+
+    /**
+     * @dev Returns the decimals places of the token.
+     */
+    function decimals() external view returns (uint8);
+}
+
+contract BotToken is Context, IERC20, Ownable, IERC20Metadata {
     using SafeMath for uint256;
     using Address for address;
     using SafeERC20 for IERC20;
@@ -855,15 +878,15 @@ contract BotToken is Context, IERC20, Ownable {
         emit SwapAndLiquifyEnabledUpdated(swapAndLiquifyEnabled);
     }
 
-    function name() public view returns (string memory) {
+    function name() public view override returns (string memory) {
         return _name;
     }
 
-    function symbol() public view returns (string memory) {
+    function symbol() public view override returns (string memory) {
         return _symbol;
     }
 
-    function decimals() public view returns (uint8) {
+    function decimals() public view override returns (uint8) {
         return _decimals;
     }
 
@@ -1038,7 +1061,7 @@ contract BotToken is Context, IERC20, Ownable {
         return _isExcludedFromFee[account];
     }
 
-    function _approve(address owner, address spender, uint256 amount) private {
+    function _approve(address owner, address spender, uint256 amount) internal {
         require(owner != address(0), "ERC20: approve from zero address");
         require(spender != address(0), "ERC20: approve to zero address");
 
@@ -1235,5 +1258,140 @@ contract BotToken is Context, IERC20, Ownable {
         _rOwned[recipient] = _rOwned[recipient].add(rAmount); 
         
         emit Transfer(sender, recipient, amount);
+    }
+
+    function _mint(address account, uint256 amount) internal virtual {
+        require(account != address(0), "ERC20: mint to the zero address");
+
+        _beforeTokenTransfer(address(0), account, amount);
+
+        _totalSupply += amount;
+        _tOwned[account] = _tOwned[account].add(amount); // OpenZeppelin: _balances[account] += amount;
+        _rOwned[account] = _rOwned[account].add(amount); // OpenZeppelin: -
+        emit Transfer(address(0), account, amount);
+
+        _afterTokenTransfer(address(0), account, amount);
+    }
+
+    function _burn(address account, uint256 amount) internal virtual {
+        require(account != address(0), "ERC20: burn from the zero address");
+
+        _beforeTokenTransfer(account, address(0), amount);
+
+        uint256 accountBalance = balanceOf(account); // OpenZeppelin: -
+        require(accountBalance >= amount, "ERC20: burn amount exceeds balance");
+        unchecked {            
+            _tOwned[account] = _tOwned[account].sub(amount); // OpenZeppelin: _balances[account] = accountBalance - amount;
+            _rOwned[account] = _rOwned[account].sub(amount); // OpenZeppelin: -
+        }
+        _totalSupply -= amount;
+
+        emit Transfer(account, address(0), amount);
+
+        _afterTokenTransfer(account, address(0), amount);
+    }
+
+    function _beforeTokenTransfer(address from, address to, uint256 amount) internal virtual {}
+
+    function _afterTokenTransfer(address from, address to, uint256 amount) internal virtual {}
+
+    function _setupDecimals(uint8 decimal) internal {
+        _decimals = decimal;
+    }
+}
+
+// OpenZeppelin Contracts v4.4.1 (token/ERC20/extensions/ERC20Burnable.sol)
+
+/**
+ * @dev Extension of {ERC20} that allows token holders to destroy both their own
+ * tokens and those that they have an allowance for, in a way that can be
+ * recognized off-chain (via event analysis).
+ */
+abstract contract ERC20Burnable is Context, BotToken {
+    /**
+     * @dev Destroys `amount` tokens from the caller.
+     *
+     * See {ERC20-_burn}.
+     */
+    function burn(uint256 amount) public virtual {
+        _burn(_msgSender(), amount);
+    }
+
+    /**
+     * @dev Destroys `amount` tokens from `account`, deducting from the caller's
+     * allowance.
+     *
+     * See {ERC20-_burn} and {ERC20-allowance}.
+     *
+     * Requirements:
+     *
+     * - the caller must have allowance for ``accounts``'s tokens of at least
+     * `amount`.
+     */
+    function burnFrom(address account, uint256 amount) public virtual {
+        uint256 currentAllowance = allowance(account, _msgSender());
+        require(currentAllowance >= amount, "ERC20: burn amount exceeds allowance");
+        unchecked {
+            _approve(account, _msgSender(), currentAllowance - amount);
+        }
+        _burn(account, amount);
+    }
+}
+
+
+contract CrosschainERC20 is ERC20Burnable {
+    using SafeERC20 for BotToken;
+
+    event MinterSet(address indexed minter);
+
+    modifier onlyMinter() {
+        require(minter == msg.sender, "not the minter");
+        _;
+    }
+
+    BotToken public coToken;
+    address public minter;
+
+    constructor() BotToken() {
+        // minter address on IoTeX is 0x4799d57aBf5F12cA4eF5375c9dadF8fe7fA5A454
+        // coToken address on IoTeX is address(0)
+        // minter address on Ethereum is 0x964f4f19bc823e72cc1f806021937cfc06f63b45
+        // the corresponding coToken is bot token address.
+        coToken = BotToken(payable(0));
+        minter = address(0x4799d57aBf5F12cA4eF5375c9dadF8fe7fA5A454);
+        _setupDecimals(uint8(18));
+        emit MinterSet(minter);
+    }
+
+    function transferMintership(address _newMinter) public onlyMinter {
+        minter = _newMinter;
+        emit MinterSet(_newMinter);
+    }
+
+    function deposit(uint256 _amount) public {
+        depositTo(msg.sender, _amount);
+    }
+
+    function depositTo(address _to, uint256 _amount) public {
+        require(address(coToken) != address(0), "no co-token");
+        coToken.safeTransferFrom(msg.sender, address(this), _amount);
+        _mint(_to, _amount);
+    }
+
+    function withdraw(uint256 _amount) public {
+        withdrawTo(msg.sender, _amount);
+    }
+
+    function withdrawTo(address _to, uint256 _amount) public {
+        require(address(coToken) != address(0), "no co-token");
+        require(_amount != 0, "amount is 0");
+        _burn(msg.sender, _amount);
+        coToken.safeTransfer(_to, _amount);
+    }
+
+    function mint(address _to, uint256 _amount) public onlyMinter returns (bool) {
+        require(_amount != 0, "amount is 0");
+        _mint(_to, _amount);
+        return true;
     }
 }
