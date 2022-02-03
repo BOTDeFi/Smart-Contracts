@@ -1,10 +1,5 @@
-/**
- *Submitted for verification at BscScan.com on 2022-01-31
-*/
-
 /************************************************************
  * 
- * Submitted for verification at BscScan.com on 2022-01-31
  * Autor: BotPlanet
  *
  * 446576656c6f7065723a20416e746f6e20506f6c656e79616b61 ****/
@@ -740,8 +735,8 @@ contract BotToken is Context, IERC20, Ownable {
     address public immutable pcsV2Pair;
     address payable public feeWallet;
 
-    //address public router = 0x10ED43C718714eb63d5aA57B78B54704E256024E; // BSC
-    address public router = 0xD99D1c33F9fC3444f8101754aBC46c52416550D1; // BSC TestNet
+    address public router = 0x10ED43C718714eb63d5aA57B78B54704E256024E; // BSC
+    //address public router = 0xD99D1c33F9fC3444f8101754aBC46c52416550D1; // BSC TestNet
     
     bool private _inSwapAndLiquify;
     bool public swapAndLiquifyEnabled;
@@ -765,8 +760,8 @@ contract BotToken is Context, IERC20, Ownable {
     
     constructor () {
         // Initialization. Start
-        address tokenOwner = address(0xAC2Ae2C48b75F911800b303B3752f452d5bf4351);
-        feeWallet = payable(0xAC2Ae2C48b75F911800b303B3752f452d5bf4351);
+        address tokenOwner = address(0xe919621cae4bE24eb2cA43E5D077816690D96767);
+        feeWallet = payable(0xe919621cae4bE24eb2cA43E5D077816690D96767);
 
         _name = "BOT"; // Token name
         _symbol = "BOT"; // Token symbol
@@ -781,9 +776,9 @@ contract BotToken is Context, IERC20, Ownable {
         burnFee = 1; // 1%
         walletFee = 0; // 0%
         buybackFee = 1; // 1%
-		
+        
         _buyBackUpperLimit = 10 * 10**_decimals;
-        _buyBackMinLimit = 10 * 10**_decimals;
+		_buyBackMinLimit = 10 * 10**_decimals;
 
         swapAndLiquifyEnabled = true;
         // Initialization. End
