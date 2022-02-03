@@ -1,4 +1,5 @@
 Address: 0x1Ab7E7DEdA201E5Ea820F6C02C65Fce7ec6bEd32
 BSCSCAN URL: https://bscscan.com/address/0x1ab7e7deda201e5ea820f6c02c65fce7ec6bed32
 CODE URL: https://bscscan.com/address/0x1ab7e7deda201e5ea820f6c02c65fce7ec6bed32#code
-OWNER: 0xe919621cae4bE24eb2cA43E5D077816690D96767
+Owner: 0xe919621cae4bE24eb2cA43E5D077816690D96767
+Deployed: 03/02/2022
