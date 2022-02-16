@@ -810,8 +810,8 @@ contract BotToken is Context, IERC20, Ownable, IERC20Metadata {
     address payable public feeWallet;
 
     // Mimo Factory: 0xda257cBe968202Dea212bBB65aB49f174Da58b9D
-    address public router = 0x95cB18889B968AbABb9104f30aF5b310bD007Fd8; // Mimo
-    // Mimo SDK: 0x147CdAe2BF7e809b9789aD0765899c06B361C5cE
+    // Mimo X 0x95cB18889B968AbABb9104f30aF5b310bD007Fd8
+    address public router = 0x147CdAe2BF7e809b9789aD0765899c06B361C5cE; // Mimo SDK
     
     bool private _inSwapAndLiquify;
     bool public swapAndLiquifyEnabled;
@@ -1374,6 +1374,7 @@ contract CrosschainERC20 is ERC20Burnable {
 
     function depositTo(address _to, uint256 _amount) public {
         require(address(coToken) != address(0), "no co-token");
+        require(_amount != 0, "amount is 0");
         coToken.safeTransferFrom(msg.sender, address(this), _amount);
         _mint(_to, _amount);
     }

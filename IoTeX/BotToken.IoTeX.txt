@@ -1,3 +1,5 @@
 Address CrosschainERC20: 0x32823f11d562068856df90fcC44654E922Cf21C6
 Name tag: io1x2pr7yw4vgrgs4kljr7vg3j5ay3v7gwxhjgjza
 IoTeX URI: https://testnet.iotexscout.io/address/io1x2pr7yw4vgrgs4kljr7vg3j5ay3v7gwxhjgjza#code
+
+Enable optimization: 200
