@@ -10,6 +10,7 @@ pragma solidity 0.8.16;
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
+import "@openzeppelin/contracts/utils/structs/EnumerableSet.sol";
 
 interface IPancakeFactory {
     event PairCreated(address indexed token0, address indexed token1, address pair, uint);
@@ -163,220 +164,196 @@ interface IPancakeRouter02 is IPancakeRouter01 {
 }
 
 contract BotToken is ERC20, Ownable {
+    // Usings
+    
     using Address for address;
     using SafeERC20 for IERC20;
-    
-    address private _dead = 0x000000000000000000000000000000000000dEaD;
-    
-    mapping (address => uint256) private _rOwned;
-    mapping (address => uint256) private _tOwned;
-    mapping (address => mapping (address => uint256)) private _allowances;
+    using EnumerableSet for EnumerableSet.AddressSet;
 
-    mapping (address => bool) private _isExcludedFromFee;
-
+    // Structs
+    
+    struct WalletConfig {
+        bool isExcludedFromFee;
+        bool isExcludedFromMaxWalletAmount;
+        bool isExcludedFromMaxTxAmount;
+        bool isExcludedFromCirculationSupply;
+    }
+    
+    // Constants
+    
     uint256 private constant MAX = ~uint256(0);
-    uint256 private _rTotal;
-    uint256 private _tFeeTotal;
-       
-    uint8 public burnFee;
-    uint8 private _previousBurnFee = burnFee;
+    address public constant ROUTER_ADDRESS = 0x10ED43C718714eb63d5aA57B78B54704E256024E; // BSC
+    //address public ROUTER_ADDRESS = 0xD99D1c33F9fC3444f8101754aBC46c52416550D1; // BSC TestNet
+    uint256 private constant DEFAULT_MAX_TX_PER = 100;
+    uint256 private constant DEFAULT_MAX_WALLET_PER = 1;
+    uint256 private MAX_SUPPLY_V1 = 1000000000 * 1e18;
+    uint256 private MAX_SUPPLY_V2 = 1000000000 * 1e18;
 
+    // Attributies
+    
+    mapping (address => WalletConfig) private _configs;
+    // Addressed to ignore from holder list, because is used for other reasons and is not real holders
+    mapping(address => bool) internal _blockedHolders;
+    EnumerableSet.AddressSet internal _holderList; // All token holders
+
+    // Properties    
+    
     IPancakeRouter02 public immutable pcsV2Router;
     address public immutable pcsV2Pair;
-
-    address public router = 0x10ED43C718714eb63d5aA57B78B54704E256024E; // BSC
-    //address public router = 0xD99D1c33F9fC3444f8101754aBC46c52416550D1; // BSC TestNet    
-   
-    uint8 public minMxTxPercentage = 1;
     uint256 public maxTxAmount;
-    uint8 public minMxWalletPercentage = 1;
     uint256 public maxWalletAmount;
+    uint256 public burnFee = 2; // 2%
   
+    // Constructor
+    
     constructor () ERC20("BOT", "BOT") {
-        // Initialization. Start
         address tokenOwner = address(0xe919621cae4bE24eb2cA43E5D077816690D96767);
-        uint256 totSupply = uint256(1000000000 * 10**decimals());
-        uint8 setMxTxPer = 100;
-        uint8 setMxWalletPer = 1;
-        burnFee = 2; // 2%        
-        // Initialization. End
 
-        _rTotal = (MAX - (MAX % totalSupply()));        
-        _rOwned[tokenOwner] = _rTotal;
-        _setMaxTxPercent(setMxTxPer);
-        _setMaxWalletPercent(setMxWalletPer);
+        setMaxTxPercent(DEFAULT_MAX_TX_PER);
+        setMaxWalletPercent(DEFAULT_MAX_WALLET_PER);
         
         // Create a PancakeSwap pair for this new token
-        IPancakeRouter02 _pcsV2Router = IPancakeRouter02(router);
+        IPancakeRouter02 _pcsV2Router = IPancakeRouter02(ROUTER_ADDRESS);
         pcsV2Pair = IPancakeFactory(_pcsV2Router.factory()).createPair(address(this), _pcsV2Router.WETH());
         pcsV2Router = _pcsV2Router;
         
-        // Exclude owner and contract address from fee
-        _isExcludedFromFee[tokenOwner] = true;
-        _isExcludedFromFee[address(this)] = true;
+        // Owner wallet configuration
+        _configs[tokenOwner].isExcludedFromFee = true;
+        _configs[tokenOwner].isExcludedFromMaxWalletAmount = true;
+        _configs[tokenOwner].isExcludedFromMaxTxAmount = true;
+        // Current contract configuration
+        _configs[address(this)].isExcludedFromFee = true;
+        _configs[address(this)].isExcludedFromMaxWalletAmount = true;
+        _configs[address(this)].isExcludedFromMaxTxAmount = true;
+        // Pancake pair configuration
+        _configs[pcsV2Pair].isExcludedFromFee = false;
+        _configs[pcsV2Pair].isExcludedFromMaxWalletAmount = true;
+        _configs[pcsV2Pair].isExcludedFromMaxTxAmount = true;
+
+        // We ignore holders, who is contracts/special address and is not real holder of tokens
+        _blockedHolders[address(0)] = true;
+        _blockedHolders[address(this)] = true;
 
         // Mint tokens to owner
-        _mint(tokenOwner, totSupply);
+        _mint(tokenOwner, MAX_SUPPLY_V2);
     }
 
-    function balanceOf(address account) public view override returns (uint256) {
-        return tokenFromReflection(_rOwned[account]);
-    }
-
-    function transfer(address recipient, uint256 amount) public override returns (bool) {
-        _transfer(_msgSender(), recipient, amount);
-        return true;
-    }
-
-    function transferFrom(address sender, address recipient, uint256 amount) public override returns (bool) {
-        _transfer(sender, recipient, amount);
-        _approve(sender, _msgSender(), _allowances[sender][_msgSender()] - amount);
-        return true;
-    }
-
-    function totalFees() public view returns (uint256) {
-        return _tFeeTotal;
-    }
-
-    function deliver(uint256 tAmount) public {
-        address sender = _msgSender();
-        (uint256 rAmount,,,) = _getValues(tAmount);
-        _rOwned[sender] = _rOwned[sender] - rAmount;
-        _rTotal = _rTotal - rAmount;
-        _tFeeTotal = _tFeeTotal + tAmount;
-    }
-
-    function reflectionFromToken(uint256 tAmount, bool deductTransferFee) public view returns(uint256) {
-        require(tAmount <= totalSupply(), "BotToken: amount be less than supply");
-        if (!deductTransferFee) {
-            (uint256 rAmount,,,) = _getValues(tAmount);
-            return rAmount;
-        } else {
-            (,uint256 rTransferAmount,,) = _getValues(tAmount);
-            return rTransferAmount;
+    // Private/Internal Methods
+    
+    function _beforeTokenTransfer(address from_, address to_, uint256 amount_) internal view override {
+        require(amount_ > 0, "BotToken: Transfer amount must be greater than zero");
+        // Check if exceeds max transfer amount
+        if(!_configs[from_].isExcludedFromMaxTxAmount && !_configs[to_].isExcludedFromMaxTxAmount) {
+            require(amount_ <= maxTxAmount, "BotToken: Transfer amount exceeds the max tx amount.");
+        }
+        // Check if exceeds new wallet amount
+        if(!_configs[from_].isExcludedFromMaxWalletAmount && !_configs[to_].isExcludedFromMaxWalletAmount){
+            uint256 contractBalanceRecepient = balanceOf(to_);
+            require(contractBalanceRecepient + amount_ <= maxWalletAmount, "BotToken: Exceeds maximum wallet amount"); 
         }
     }
 
-    function tokenFromReflection(uint256 rAmount) public view returns(uint256) {
-        require(rAmount <= _rTotal, "BotToken: amount must be less than tot refl");
-        uint256 currentRate =  _getRate();
-        return rAmount / currentRate;
-    }
-    
-    function _setMaxTxPercent(uint256 maxTxPercent) private {
-        require(maxTxPercent >= minMxTxPercentage && maxTxPercent <= 100, "BotToken: set max tx percenterr");
-        maxTxAmount = totalSupply() * maxTxPercent / 100;
+    function _transfer(address from_, address to_, uint256 amount_) internal override {
+        // Check if apply fee or not
+        if(_configs[from_].isExcludedFromFee || _configs[to_].isExcludedFromFee) {
+            // Don't take fee
+            super._transfer(from_, to_, amount_);
+        } else {
+            // Take fee and burn it
+            uint256 toBurnAmount = amount_ * burnFee / 100;
+            _burn(from_, toBurnAmount);
+            super._transfer(from_, to_, amount_ - toBurnAmount);
+        }
     }
 
-    function _setMaxWalletPercent(uint256 maxWalletPercent) private {
-        require(maxWalletPercent >= minMxWalletPercentage && maxWalletPercent <= 100, "BotToken: set max wallet percent");
-        maxWalletAmount = totalSupply() * maxWalletPercent / 100;
+    // With this function, after tokens is transfer, we review holder list to remove 0 balance holders,
+    // and add new holders with new balance
+    function _afterTokenTransfer(address from_, address to_, uint256 amount_) internal override {
+        // Step 0: Check if amount is to change anything. If is 0, we don't change any list of holders,
+        // because really we don't have any change in amounts
+        if (amount_ > 0) {
+            // Step 1: Check from account (not accept mint case)
+            if (from_ != address(0) && balanceOf(from_) == 0 && !_blockedHolders[from_]) {
+                // This address not has any balance
+                require(_holderList.remove(from_), "BotToken: cannot remove holder");
+            }
+            // Step 2: Check to account && Check if holder is allowed
+            if (to_ != address(0) && !_holderList.contains(to_) && !_blockedHolders[to_]) {
+                // Is not burn case. Add holder to list
+                require(_holderList.add(to_), "BotToken: cannot add new holder");
+            }
+        }
+    }
+
+    // Public/External Methods
+
+    function setBurnFee(uint256 burnFee_) external onlyOwner {
+        require(burnFee_ >= 1 && burnFee_ <= 100, "BotToken: set bern fee percent");
+        burnFee = burnFee_;
     }
     
+    function setMaxTxPercent(uint256 maxTxPercent_) public onlyOwner {
+        require(maxTxPercent_ >= 1 && maxTxPercent_ <= 100, "BotToken: set max tx percent");
+        maxTxAmount = totalSupply() * maxTxPercent_ / 100;
+    }
+
+    function setMaxWalletPercent(uint256 maxWalletPercent_) public onlyOwner {
+        require(maxWalletPercent_ >= 1 && maxWalletPercent_ <= 100, "BotToken: set max wallet percent");
+        maxWalletAmount = totalSupply() * maxWalletPercent_ / 100;
+    }
+
+    function setBlockedHolder(address account_, bool isBlocked_) external onlyOwner {
+        _blockedHolders[account_] = isBlocked_;
+    }
+
+    function setIsExcludedFromFee(address account_, bool value_) public onlyOwner {
+        _configs[account_].isExcludedFromFee = value_;
+    }
+
+    function setIsExcludedFromMaxWalletAmount(address account_, bool value_) public onlyOwner {
+        _configs[account_].isExcludedFromMaxWalletAmount = value_;
+    }
+
+    function setIsExcludedFromMaxTxAmount(address account_, bool value_) public onlyOwner {
+        _configs[account_].isExcludedFromMaxTxAmount = value_;
+    }
+
+    function setIsExcludedFromCirculationSupply(address account_, bool value_) public onlyOwner {
+        _configs[account_].isExcludedFromCirculationSupply = value_;
+    }
+
+    function burn(uint256 amount_) public {
+        _burn(msg.sender, amount_);
+    }
+
+    function holder(uint256 index_) public view returns (address) {
+        return _holderList.at(index_);
+    }
+
+    function walletConfig(address account_) public view returns(WalletConfig memory) {
+        return _configs[account_];
+    }
+
+    function isBlockedHolder(address account_) public view returns(bool) {
+        return _blockedHolders[account_];
+    }
+
+    function numberOfHolders() external view returns (uint256) {
+        return _holderList.length();
+    }
+
+    function numberTokensBurned() external view returns (uint256) {
+        return MAX_SUPPLY_V1 - totalSupply();
+    }
+
+    function maxSupply() public view returns(uint256) {
+        return MAX_SUPPLY_V1;
+    }
+
+    function circulationSupply() public view returns(uint256) {
+        return _holderList.length() - _holderList.length();
+    }
+
     // To recieve ETH from pcsV2Router when swaping
     receive() external payable {}
-
-    function _getValues(uint256 tAmount) private view returns (uint256, uint256, uint256, uint256) {
-        (uint256 tTransferAmount, uint256 tLiquidity) = _getTValues(tAmount);
-        (uint256 rAmount, uint256 rTransferAmount) = _getRValues(tAmount, tLiquidity, _getRate());
-        return (rAmount, rTransferAmount, tTransferAmount, tLiquidity);
-    }
-
-    function _getTValues(uint256 tAmount) private view returns (uint256, uint256) {
-        uint256 tLiquidity = calculateLiquidityFee(tAmount);
-        uint256 tTransferAmount = tAmount - tLiquidity;
-        return (tTransferAmount, tLiquidity);
-    }
-
-    function _getRValues(uint256 tAmount, uint256 tLiquidity, uint256 currentRate) private pure returns (uint256, uint256) {
-        uint256 rAmount = tAmount * currentRate;
-        uint256 rLiquidity = tLiquidity * currentRate;
-        uint256 rTransferAmount = rAmount - rLiquidity;
-        return (rAmount, rTransferAmount);
-    }
-
-    function _getRate() private view returns(uint256) {
-        (uint256 rSupply, uint256 tSupply) = _getCurrentSupply();
-        return rSupply / tSupply;
-    }
-
-    function _getCurrentSupply() private view returns(uint256, uint256) {
-        uint256 rSupply = _rTotal;
-        uint256 tSupply = totalSupply();
-          if (rSupply < _rTotal / totalSupply()) {
-            return (_rTotal, totalSupply());
-        }
-        return (rSupply, tSupply);
-    }
-    
-    function _takeLiquidity(uint256 tLiquidity) private {
-        uint256 currentRate =  _getRate();
-        uint256 rLiquidity = tLiquidity * currentRate;
-        _rOwned[address(this)] = _rOwned[address(this)] + rLiquidity;
-    }
-
-    function calculateLiquidityFee(uint256 _amount) private view returns (uint256) {
-        return _amount * burnFee / 100;
-    }
-    
-    function removeAllFee() private {
-        if(burnFee == 0) return;
-        
-        _previousBurnFee = burnFee;        
-        burnFee = 0;
-    }
-    
-    function restoreAllFee() private {
-        burnFee = _previousBurnFee;
-    }
-    
-    function isExcludedFromFee(address account) public view returns(bool) {
-        return _isExcludedFromFee[account];
-    }
-
-    function _transfer(address from, address to, uint256 amount) private {
-        require(from != address(0), "ERC20: transfer from zero address");
-        require(to != address(0), "ERC20: transfer to zero address");
-        require(amount > 0, "Transfer amount must be greater than zero");
-        if(from != owner() && to != owner()) {
-            require(amount <= maxTxAmount, "Transfer amount exceeds the maxTxAmount.");
-        }
-
-        if(from != owner() && to != owner() && to != address(0) && to != _dead && to != pcsV2Pair){
-            uint256 contractBalanceRecepient = balanceOf(to);
-            require(contractBalanceRecepient + amount <= maxWalletAmount, "Exceeds maximum wallet amount"); 
-        }
-        
-        // Indicates if fee should be deducted from transfer
-        bool takeFee = true;
-        
-        // If any account belongs to _isExcludedFromFee account then remove the fee
-        if(isExcludedFromFee(from) || isExcludedFromFee(to)) {
-            takeFee = false;
-        }
-        
-        // Transfer amount, it will take tax, burn, liquidity fee
-        _tokenTransfer(from, to, amount, takeFee);
-    }
-
-    //this method is responsible for taking all fee, if takeFee is true
-    function _tokenTransfer(address sender, address recipient, uint256 amount,bool takeFee) private {
-        if(!takeFee) {
-            removeAllFee();
-        }
-
-        _transferStandard(sender, recipient, amount);
-        
-        if(!takeFee) {
-            restoreAllFee();
-        }
-    }
-
-    function _transferStandard(address sender, address recipient, uint256 tAmount) private {
-        (uint256 rAmount, uint256 rTransferAmount, uint256 tTransferAmount, uint256 tLiquidity) = _getValues(tAmount);
-        _rOwned[sender] = _rOwned[sender] - rAmount;
-        _rOwned[recipient] = _rOwned[recipient] + rTransferAmount;
-        _takeLiquidity(tLiquidity);
-        emit Transfer(sender, recipient, tTransferAmount);
-    }
 }
