@@ -176,11 +176,11 @@ contract BotToken is ERC20, Ownable {
         bool isExcludedFromFee;
         bool isExcludedFromMaxWalletAmount;
         bool isExcludedFromMaxTxAmount;
-        bool isExcludedFromCirculationSupply;
     }
     
     // Constants
     
+    address private INITIAL_TOKEN_OWNER = 0xe919621cae4bE24eb2cA43E5D077816690D96767;
     uint256 private constant MAX = ~uint256(0);
     address public constant ROUTER_ADDRESS = 0x10ED43C718714eb63d5aA57B78B54704E256024E; // BSC
     //address public ROUTER_ADDRESS = 0xD99D1c33F9fC3444f8101754aBC46c52416550D1; // BSC TestNet
@@ -193,49 +193,39 @@ contract BotToken is ERC20, Ownable {
     
     mapping (address => WalletConfig) private _configs;
     // Addressed to ignore from holder list, because is used for other reasons and is not real holders
-    mapping(address => bool) internal _blockedHolders;
+    mapping(address => bool) internal _excludedHolders;
     EnumerableSet.AddressSet internal _holderList; // All token holders
-
+    EnumerableSet.AddressSet internal _excludedFromCirculationSupply;
     // Properties    
     
-    IPancakeRouter02 public immutable pcsV2Router;
-    address public immutable pcsV2Pair;
+    IPancakeRouter02 public pcsV2Router;
+    address public pcsV2Pair;
     uint256 public maxTxAmount;
     uint256 public maxWalletAmount;
     uint256 public burnFee = 2; // 2%
+    bool public initialized;
   
     // Constructor
     
     constructor () ERC20("BOT", "BOT") {
-        address tokenOwner = address(0xe919621cae4bE24eb2cA43E5D077816690D96767);
-
         setMaxTxPercent(DEFAULT_MAX_TX_PER);
         setMaxWalletPercent(DEFAULT_MAX_WALLET_PER);
         
-        // Create a PancakeSwap pair for this new token
-        IPancakeRouter02 _pcsV2Router = IPancakeRouter02(ROUTER_ADDRESS);
-        pcsV2Pair = IPancakeFactory(_pcsV2Router.factory()).createPair(address(this), _pcsV2Router.WETH());
-        pcsV2Router = _pcsV2Router;
-        
         // Owner wallet configuration
-        _configs[tokenOwner].isExcludedFromFee = true;
-        _configs[tokenOwner].isExcludedFromMaxWalletAmount = true;
-        _configs[tokenOwner].isExcludedFromMaxTxAmount = true;
+        _configs[owner()].isExcludedFromFee = true;
+        _configs[owner()].isExcludedFromMaxWalletAmount = true;
+        _configs[owner()].isExcludedFromMaxTxAmount = true;
         // Current contract configuration
         _configs[address(this)].isExcludedFromFee = true;
         _configs[address(this)].isExcludedFromMaxWalletAmount = true;
         _configs[address(this)].isExcludedFromMaxTxAmount = true;
-        // Pancake pair configuration
-        _configs[pcsV2Pair].isExcludedFromFee = false;
-        _configs[pcsV2Pair].isExcludedFromMaxWalletAmount = true;
-        _configs[pcsV2Pair].isExcludedFromMaxTxAmount = true;
 
         // We ignore holders, who is contracts/special address and is not real holder of tokens
-        _blockedHolders[address(0)] = true;
-        _blockedHolders[address(this)] = true;
+        _excludedHolders[address(0)] = true;
+        _excludedHolders[address(this)] = true;
 
         // Mint tokens to owner
-        _mint(tokenOwner, MAX_SUPPLY_V2);
+        _mint(owner(), MAX_SUPPLY_V2);
     }
 
     // Private/Internal Methods
@@ -273,12 +263,12 @@ contract BotToken is ERC20, Ownable {
         // because really we don't have any change in amounts
         if (amount_ > 0) {
             // Step 1: Check from account (not accept mint case)
-            if (from_ != address(0) && balanceOf(from_) == 0 && !_blockedHolders[from_]) {
+            if (from_ != address(0) && balanceOf(from_) == 0 && !_excludedHolders[from_]) {
                 // This address not has any balance
                 require(_holderList.remove(from_), "BotToken: cannot remove holder");
             }
             // Step 2: Check to account && Check if holder is allowed
-            if (to_ != address(0) && !_holderList.contains(to_) && !_blockedHolders[to_]) {
+            if (to_ != address(0) && !_holderList.contains(to_) && !_excludedHolders[to_]) {
                 // Is not burn case. Add holder to list
                 require(_holderList.add(to_), "BotToken: cannot add new holder");
             }
@@ -286,6 +276,21 @@ contract BotToken is ERC20, Ownable {
     }
 
     // Public/External Methods
+    function init() external onlyOwner {
+        require(!initialized, "BotToken: already initialized!");
+
+        // Create a PancakeSwap pair for this new token
+        IPancakeRouter02 pcsV2Router_ = IPancakeRouter02(ROUTER_ADDRESS);
+        pcsV2Pair = IPancakeFactory(pcsV2Router_.factory()).createPair(address(this), pcsV2Router_.WETH());
+        pcsV2Router = pcsV2Router_;
+
+        // Pancake pair configuration
+        _configs[pcsV2Pair].isExcludedFromFee = false;
+        _configs[pcsV2Pair].isExcludedFromMaxWalletAmount = true;
+        _configs[pcsV2Pair].isExcludedFromMaxTxAmount = true;
+
+        initialized = true;
+    }
 
     function setBurnFee(uint256 burnFee_) external onlyOwner {
         require(burnFee_ >= 1 && burnFee_ <= 100, "BotToken: set bern fee percent");
@@ -302,40 +307,52 @@ contract BotToken is ERC20, Ownable {
         maxWalletAmount = totalSupply() * maxWalletPercent_ / 100;
     }
 
-    function setBlockedHolder(address account_, bool isBlocked_) external onlyOwner {
-        _blockedHolders[account_] = isBlocked_;
+    function setExcludedHolder(address account_, bool isExcluded_) external onlyOwner {
+        _excludedHolders[account_] = isExcluded_;
     }
 
-    function setIsExcludedFromFee(address account_, bool value_) public onlyOwner {
+    function isExcludedHolder(address account_) external view returns(bool) {
+        return _excludedHolders[account_];
+    }
+
+    function setIsExcludedFromFee(address account_, bool value_) external onlyOwner {
         _configs[account_].isExcludedFromFee = value_;
     }
 
-    function setIsExcludedFromMaxWalletAmount(address account_, bool value_) public onlyOwner {
+    function setIsExcludedFromMaxWalletAmount(address account_, bool value_) external onlyOwner {
         _configs[account_].isExcludedFromMaxWalletAmount = value_;
     }
 
-    function setIsExcludedFromMaxTxAmount(address account_, bool value_) public onlyOwner {
+    function setIsExcludedFromMaxTxAmount(address account_, bool value_) external onlyOwner {
         _configs[account_].isExcludedFromMaxTxAmount = value_;
     }
 
-    function setIsExcludedFromCirculationSupply(address account_, bool value_) public onlyOwner {
-        _configs[account_].isExcludedFromCirculationSupply = value_;
+    function setIsExcludedFromCirculationSupply(address account_, bool value_) external onlyOwner {
+        if(_excludedFromCirculationSupply.contains(account_)) {
+            // Now is excluded address
+            require(!value_, "BotToken: already excluded from circulation supply");
+            _excludedFromCirculationSupply.remove(account_);
+        } else {
+            // Address is not excluded
+            require(value_, "BotToken: is not excluded from circulation supply");
+            _excludedFromCirculationSupply.add(account_);
+        }
     }
 
-    function burn(uint256 amount_) public {
+    function isExcludedFromCirculationSupply(address account_) external view returns(bool) {
+        return _excludedFromCirculationSupply.contains(account_);
+    }
+
+    function burn(uint256 amount_) external {
         _burn(msg.sender, amount_);
     }
 
-    function holder(uint256 index_) public view returns (address) {
+    function holder(uint256 index_) external view returns (address) {
         return _holderList.at(index_);
     }
 
-    function walletConfig(address account_) public view returns(WalletConfig memory) {
+    function walletConfig(address account_) external view returns(WalletConfig memory) {
         return _configs[account_];
-    }
-
-    function isBlockedHolder(address account_) public view returns(bool) {
-        return _blockedHolders[account_];
     }
 
     function numberOfHolders() external view returns (uint256) {
@@ -346,12 +363,18 @@ contract BotToken is ERC20, Ownable {
         return MAX_SUPPLY_V1 - totalSupply();
     }
 
-    function maxSupply() public view returns(uint256) {
+    function maxSupply() external view returns(uint256) {
         return MAX_SUPPLY_V1;
     }
 
-    function circulationSupply() public view returns(uint256) {
-        return _holderList.length() - _holderList.length();
+    function circulationSupply() external view returns(uint256) {
+        uint256 result = totalSupply();
+        uint256 excludedLenght = _excludedFromCirculationSupply.length();
+        for(uint256 i = 0; i < excludedLenght; i++) {
+            address excluded = _excludedFromCirculationSupply.at(i);
+            result -= balanceOf(excluded);
+        }
+        return result;
     }
 
     // To recieve ETH from pcsV2Router when swaping
