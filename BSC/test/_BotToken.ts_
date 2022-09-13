@@ -13,7 +13,7 @@ describe("BOT", function () {
     // Contracts are deployed using the first signer/account by default
     const [owner, account1, account2, account3] = await ethers.getSigners();
 
-    const BOT = await ethers.getContractFactory("BotToken");
+    const BOT = await ethers.getContractFactory("BotTokenV2");
     const bot = await BOT.deploy();
 
     return { bot, owner, account1, account2, account3 };
@@ -348,6 +348,32 @@ describe("BOT", function () {
 
       expect(account3BalanceExpected).to.equal(account3BalanceResult);
     });
+
+    it("16. Test transferOwnership from current to account1", async function() {
+      // ARRANGE
+      const { bot, account1 } = await loadFixture(deployBOTFixture);
+
+      // ACT
+      await bot.transferOwnership(account1.address);
+      const ownerResult: string = await bot.owner();
+      const ownerExpected: string = account1.address;
+
+      // ASSERT
+      expect(ownerExpected).to.equal(ownerResult);
+    });
+
+    it("17. Test renounceOwnership", async function() {
+      // ARRANGE
+      const { bot } = await loadFixture(deployBOTFixture);
+
+      // ACT
+      await bot.renounceOwnership();
+      const ownerResult: string = await bot.owner();
+      const ownerExpected: string = "0x0000000000000000000000000000000000000000";
+
+      // ASSERT
+      expect(ownerExpected).to.equal(ownerResult);
+    });
   });
 
   describe("Properties", function () {
@@ -439,5 +465,24 @@ describe("BOT", function () {
         bot.transfer(account1.address, maxWalletAmount)
       ).to.be.revertedWith("BotToken: Exceeds maximum wallet amount");
     });
+
+    it("5. Test name, symbol, decimals", async function () {
+      const { bot } = await loadFixture(deployBOTFixture);
+
+      // Get data
+      const nameResult: string = await bot.name();
+      const symbolResult: string = await bot.symbol();
+      const decimalsResult: number = await bot.decimals();
+
+      const nameExpected: string = "BOT";
+      const symbolExpected: string = "BOT";
+      const decimalsExpected: number = 18;
+
+      // Verify data
+      expect(nameExpected).to.equal(nameResult);
+      expect(symbolExpected).to.equal(symbolResult);
+      expect(decimalsExpected).to.equal(decimalsResult);
+    });
+
   });
 });

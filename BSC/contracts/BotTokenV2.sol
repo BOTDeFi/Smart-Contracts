@@ -248,7 +248,7 @@ interface IPancakeRouter02 is IPancakeRouter01 {
     ) external;
 }
 
-contract BotToken is ERC20, Ownable {
+contract BotTokenV2 is ERC20, Ownable {
     // Usings
 
     using Address for address;
