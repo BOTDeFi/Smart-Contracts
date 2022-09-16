@@ -213,12 +213,9 @@ contract DAO is Ownable, ReentrancyGuard {
     // A function that can be called by proposal voting to end the voting urgently.
     function endProposal(uint256 proposalId_)
         external
+        onlyOwner
         endProposalCondition(proposalId_)
     {
-        require(
-            msg.sender == address(this),
-            "Only a contract can end proposal"
-        );
         _proposals[proposalId_].isFinished = true;
         emit FinishedEmergency(proposalId_);
     }
@@ -299,7 +296,7 @@ contract DAO is Ownable, ReentrancyGuard {
     }
 
     // Get balance of user in DAO
-    function getBalance(address voter_) external view returns (uint256) {
+    function getUserBalance(address voter_) external view returns (uint256) {
         return _users[voter_].balance;
     }
 

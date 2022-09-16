@@ -1,7 +1,7 @@
 import { time, loadFixture } from "@nomicfoundation/hardhat-network-helpers";
 import { SignerWithAddress } from "@nomiclabs/hardhat-ethers/signers";
 import { expect, use } from "chai";
-import { ethers } from "hardhat";
+import { ethers, network } from "hardhat";
 import { BigNumber } from "ethers";
 import { DAO } from "../typechain-types";
 
@@ -10,7 +10,7 @@ describe("DAO", function () {
     const ABI = ["function increment(uint256 num)"];
     const iface = new ethers.utils.Interface(ABI);
     const txData = iface.encodeFunctionData("increment", [5]);
-    const period: BigNumber = ethers.utils.parseEther("259200"); // 3 days
+    const period: BigNumber = BigNumber.from(259200); // 3 days
     const zero: BigNumber = BigNumber.from("0");
     const minumumUserTokens: BigNumber = ethers.utils.parseEther("1000");
     const proposalDescription: string = "Some description";
@@ -68,7 +68,35 @@ describe("DAO", function () {
         it("5. Test balances", async () => {
             const { dao, signers } = await loadFixture(deployDAOFixture);
 
-            expect(await dao.getBalance(signers[0].address)).to.eq(0);
+            expect(await dao.getUserBalance(signers[0].address)).to.eq(0);
+        });
+    });
+
+    describe("Contract owner", function () {
+        it("1. Test withdrawETH (reverts, event ETHWithdrawn)", async function () {
+            const { bot, dao, user, owner } = await loadFixture(deployDAOFixture);
+
+            // Ownable: caller is not the owner
+            const amount: BigNumber = ethers.utils.parseEther("3");
+            await expect(dao.connect(user).withdrawETH(owner.address, amount))
+                .to.be.revertedWith("Ownable: caller is not the owner");
+
+            // Address: insufficient balance
+            await expect(dao.withdrawETH(owner.address, amount))
+                .to.be.revertedWith("Address: insufficient balance");
+
+            // Event ETHWithdrawn
+            await network.provider.send("hardhat_setBalance", [
+                dao.address,
+                ethers.utils.parseEther("5").toHexString()
+            ]);
+            const balanceETHofDAOResult = await dao.provider.getBalance(dao.address);
+            const balanceETHofDAOExpected = ethers.utils.parseEther("5");
+            expect(balanceETHofDAOExpected).to.equal(balanceETHofDAOResult);
+            
+            await expect(dao.withdrawETH(owner.address, amount))
+                .to.emit(dao, "ETHWithdrawn")
+                .withArgs(owner.address, amount);
         });
     });
 
@@ -89,6 +117,8 @@ describe("DAO", function () {
             ).timestamp;
 
             const result = await dao.getProposalById(0);
+            const lastProposalIdResult = await dao.getLastProposalId();
+            const lastProposalIdExpected = 1;
 
             // ASSERT
             expect(result[0]).to.eq(bot.address);
@@ -100,11 +130,72 @@ describe("DAO", function () {
             expect(result[6]).to.eq(zero);
             expect(result[7]).to.eq(zero);
             expect(result[8]).to.eq(minumumUserTokens);
+
+            expect(lastProposalIdExpected).to.equal(lastProposalIdResult);
+        });
+
+        it("2. Test endProposal (reverts, Event FinishedEmergency)", async function () {
+            // ARRANGE
+            const { bot, dao, user, signers } = await loadFixture(deployDAOFixture);
+            const proposalId = BigNumber.from(0);
+
+            // ACT
+            await dao.addProposal(bot.address, txData, proposalDescription, minumumUserTokens);
+
+            // DAO: Voting time is not over yet
+            await expect(
+                dao.endProposal(proposalId)
+            ).to.be.revertedWith("DAO: Voting time is not over yet");
+
+            await time.increase(period);
+
+            // Ownable: caller is not the owner
+            await expect(
+                dao.connect(user).endProposal(proposalId)
+            ).to.be.revertedWith("Ownable: caller is not the owner");
+
+            // Event FinishedEmergency
+            await expect(dao.endProposal(proposalId))
+                .to.emit(dao, "FinishedEmergency")
+                .withArgs(proposalId);
+
+            // DAO: Voting has already ended
+            await expect(
+                dao.endProposal(proposalId)
+            ).to.be.revertedWith("DAO: Voting has already ended");
+        });
+    });
+
+    describe("Owner management", function () {
+        it("1. Test transferOwnership from current to account1", async function () {
+            // ARRANGE
+            const { bot, user } = await loadFixture(deployDAOFixture);
+
+            // ACT
+            await bot.transferOwnership(user.address);
+            const ownerResult: string = await bot.owner();
+            const ownerExpected: string = user.address;
+
+            // ASSERT
+            expect(ownerExpected).to.equal(ownerResult);
+        });
+
+        it("2. Test renounceOwnership", async function () {
+            // ARRANGE
+            const { bot } = await loadFixture(deployDAOFixture);
+
+            // ACT
+            await bot.renounceOwnership();
+            const ownerResult: string = await bot.owner();
+            const ownerExpected: string = "0x0000000000000000000000000000000000000000";
+
+            // ASSERT
+            expect(ownerExpected).to.equal(ownerResult);
         });
     });
 
     describe("Proposal user", function () {
-        it("1. Test deposit (revert DAO: Amount is 0, event Credited, getBalance, getActiveUsers)", async function () {
+        it("1. Test deposit (revert DAO: Amount is 0, event Credited, getUserBalance, getActiveUsers)", async function () {
             const { bot, owner, dao, user } = await loadFixture(deployDAOFixture);
 
             const amount: BigNumber = BigNumber.from(100);
@@ -125,7 +216,7 @@ describe("DAO", function () {
 
             // Check balance
             const balanceExpected = amount;
-            const balanceResult = await dao.getBalance(user.address);
+            const balanceResult = await dao.getUserBalance(user.address);
             expect(balanceExpected).to.eq(balanceResult);
 
             // Check incremented activeUsers
@@ -135,7 +226,7 @@ describe("DAO", function () {
         });
 
         it("2. Test vote (reverts, event Voted)", async function () {
-            const { bot, owner, dao, signers, user } = await loadFixture(deployDAOFixture);
+            const { bot, dao, user } = await loadFixture(deployDAOFixture);
 
             await dao.addProposal(bot.address, txData, proposalDescription, minumumUserTokens);
             const proposalId: BigNumber = BigNumber.from(0);
@@ -164,13 +255,14 @@ describe("DAO", function () {
                 .to.be.revertedWith("DAO: You have already voted in this proposal");
 
             // DAO: The voting is already over or does not exist
-            await time.increaseTo(period.add(period));
+            const endVoteTime = (await time.latest()) + period.toNumber();
+            await time.setNextBlockTimestamp(endVoteTime);
             await expect(dao.connect(user).vote(proposalId, answer))
                 .to.be.revertedWith("DAO: The voting is already over or does not exist");
         });
 
         it("3. Test vote (consentings, dissenters, isUserVoted, lastVoteEndTime, usersVoted)", async function () {
-            const { bot, owner, dao, signers, user } = await loadFixture(deployDAOFixture);
+            const { bot, owner, dao, user } = await loadFixture(deployDAOFixture);
 
             await dao.addProposal(bot.address, txData, proposalDescription, minumumUserTokens);
             const proposalId: BigNumber = BigNumber.from(0);
@@ -183,9 +275,9 @@ describe("DAO", function () {
             await dao.connect(user).vote(proposalId, true);
 
             let proposal: DAO.ProposalStructOutput = await dao.getProposalById(proposalId);
-            const concentingsResult = proposal.consenting;
-            const concentingsExpected = amountVoteTrue;
-            expect(concentingsExpected).to.equal(concentingsResult);
+            const concentingsBalancesResult = proposal.consenting;
+            const concentingsBalancesExpected = amountVoteTrue;
+            expect(concentingsBalancesExpected).to.equal(concentingsBalancesResult);
 
             // dissenters
             const amountVoteFalse: BigNumber = minumumUserTokens;
@@ -194,9 +286,9 @@ describe("DAO", function () {
             await dao.connect(owner).vote(proposalId, false);
 
             proposal = await dao.getProposalById(proposalId);
-            const dissentersResult: BigNumber = proposal.dissenters;
-            const dissentersExpected: BigNumber = amountVoteFalse;
-            expect(dissentersExpected).to.equal(dissentersResult);
+            const dissentersBalancesResult: BigNumber = proposal.dissenters;
+            const dissentersBalancesExpected: BigNumber = amountVoteFalse;
+            expect(dissentersBalancesExpected).to.equal(dissentersBalancesResult);
 
             // isUserVoted
             const isUserVotedResult: boolean = await dao.isUserVoted(user.address, proposalId);
@@ -213,5 +305,72 @@ describe("DAO", function () {
             const usersVotedExpected = 2;
             expect(usersVotedExpected).to.equal(usersVotedResult);
         });
+
+        it("4. Test withdrawTokens (reverts, user balance, getActiveUsers, event TokensWithdrawn)", async function () {
+            const { bot, owner, dao, user } = await loadFixture(deployDAOFixture);
+
+            await dao.addProposal(bot.address, txData, proposalDescription, minumumUserTokens);
+            await bot.approve(dao.address, minumumUserTokens);
+            await dao.deposit(minumumUserTokens);
+            const proposalId = 0;
+            const answer = true;
+            await dao.vote(proposalId, answer);
+
+            // DAO: Insufficient funds on the balance
+            await expect(dao.withdrawTokens(minumumUserTokens.mul(2)))
+                .to.be.revertedWith("DAO: Insufficient funds on the balance");
+
+            // DAO: The last vote you participated in hasn't ended yet
+            await expect(dao.withdrawTokens(minumumUserTokens))
+                .to.be.revertedWith("DAO: The last vote you participated in hasn't ended yet");
+
+            // Event TokensWithdrawn
+            const userBalanceBefore = await dao.getUserBalance(owner.address);
+            const activeUsersBefore = await dao.getActiveUsers();
+
+            const proposal = await dao.getProposalById(proposalId);
+            let endTime = proposal.endTime.add(1);
+            await time.setNextBlockTimestamp(endTime);
+            await expect(dao.withdrawTokens(minumumUserTokens))
+                .to.emit(dao, "TokensWithdrawn")
+                .withArgs(owner.address, minumumUserTokens);
+
+            // Check user balance descrease
+            const userBalanceAfter = await dao.getUserBalance(owner.address);
+            expect(userBalanceAfter).to.lessThan(userBalanceBefore);
+
+            // Active users decrement
+            const activeUsersAfter = await dao.getActiveUsers();
+            expect(activeUsersAfter).to.lessThan(activeUsersBefore);
+        });
     });
 });
+
+/*
+write:
+
++addProposal
++deposit
++endProposal
+finishProposal
++renounceOwnership
++transferOwnership
++vote
+withdrawETH
++withdrawTokens
+
+read:
+
++getActiveUsers
++getUserBalance
++getDebatePeriod
++getLastProposalId
++getMinQuorum
++getMinVotes
++getProposalById
++getToken
++isUserVoted
++owner
++userLastVoteEndTime
+
+*/
