@@ -287,11 +287,19 @@ contract BotTokenV2 is ERC20, Ownable {
     // Properties
 
     IPancakeRouter02 public pcsV2Router;
+    address public dao;
     address public pcsV2Pair; // address of pair in PancakeSwap (BOT / WBNB)
     uint256 public maxTxAmount; // Max transaction amount
     uint256 public maxWalletAmount; // Max wallet balance
     uint256 public burnFee = 2; // Burn fee 2%
     bool public initialized; // Initialized or not pair in PancakeSwap
+
+    // Modifiers
+
+    modifier onlyOwnerOrDAO() {
+        require(owner() == _msgSender() || dao == _msgSender(), "BOT: caller is not the owner or DAO");
+        _;
+    }
 
     // Constructor
 
@@ -407,8 +415,10 @@ contract BotTokenV2 is ERC20, Ownable {
     }
 
     // Public/External Methods
-    function init() external onlyOwner {
+    function init(address dao_) external onlyOwnerOrDAO {
         require(!initialized, "BotToken: already initialized!");
+
+        setDAO(dao_);
 
         // Create a PancakeSwap pair for this new token
         IPancakeRouter02 pcsV2Router_ = IPancakeRouter02(ROUTER_ADDRESS);
@@ -426,7 +436,12 @@ contract BotTokenV2 is ERC20, Ownable {
         initialized = true;
     }
 
-    function setBurnFee(uint256 burnFee_) external onlyOwner {
+    function setDAO(address dao_) public onlyOwnerOrDAO {
+        require(dao_ != address(0), "BotToken: for DAO is not accepted 0 address!");
+        dao = dao_;
+    }
+
+    function setBurnFee(uint256 burnFee_) external onlyOwnerOrDAO {
         require(
             burnFee_ >= 1 && burnFee_ <= 100,
             "BotToken: set bern fee percent"
@@ -434,7 +449,7 @@ contract BotTokenV2 is ERC20, Ownable {
         burnFee = burnFee_;
     }
 
-    function setMaxTxPercent(uint256 maxTxPercent_) public onlyOwner {
+    function setMaxTxPercent(uint256 maxTxPercent_) public onlyOwnerOrDAO {
         require(
             maxTxPercent_ >= 1 && maxTxPercent_ <= 100,
             "BotToken: set max tx percent"
@@ -442,7 +457,7 @@ contract BotTokenV2 is ERC20, Ownable {
         maxTxAmount = (totalSupply() * maxTxPercent_) / 100;
     }
 
-    function setMaxWalletPercent(uint256 maxWalletPercent_) public onlyOwner {
+    function setMaxWalletPercent(uint256 maxWalletPercent_) public onlyOwnerOrDAO {
         require(
             maxWalletPercent_ >= 1 && maxWalletPercent_ <= 100,
             "BotToken: set max wallet percent"
@@ -452,7 +467,7 @@ contract BotTokenV2 is ERC20, Ownable {
 
     function setExcludedHolder(address account_, bool isExcluded_)
         external
-        onlyOwner
+        onlyOwnerOrDAO
     {
         _excludedHolders[account_] = isExcluded_;
     }
@@ -463,28 +478,28 @@ contract BotTokenV2 is ERC20, Ownable {
 
     function setIsExcludedFromFee(address account_, bool value_)
         external
-        onlyOwner
+        onlyOwnerOrDAO
     {
         _configs[account_].isExcludedFromFee = value_;
     }
 
     function setIsExcludedFromMaxWalletAmount(address account_, bool value_)
         external
-        onlyOwner
+        onlyOwnerOrDAO
     {
         _configs[account_].isExcludedFromMaxWalletAmount = value_;
     }
 
     function setIsExcludedFromMaxTxAmount(address account_, bool value_)
         external
-        onlyOwner
+        onlyOwnerOrDAO
     {
         _configs[account_].isExcludedFromMaxTxAmount = value_;
     }
 
     function setIsExcludedFromCirculationSupply(address account_, bool value_)
         external
-        onlyOwner
+        onlyOwnerOrDAO
     {
         if (_excludedFromCirculationSupply.contains(account_)) {
             // Now is excluded address

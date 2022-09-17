@@ -31,8 +31,9 @@ contract DAO is Ownable, ReentrancyGuard {
         uint256 endTime; // When proposal is end and is not possible vote more
         uint256 consenting; // Sum of balances of users who voted "true". Is not number of users
         uint256 dissenters; // Sum of balances of users who voted "false". Is not number of users
-        uint256 usersVoted; // Count of user who voted true and false
+        uint256 usersVotedTotal; // Count of user who voted true and false
         uint256 minumumUserTokens; // How many tokens is needed to vote. Zero is not allowed
+        uint256 usersVotedTrue; // Count of user who voted true
     }
 
     // Events
@@ -51,7 +52,8 @@ contract DAO is Ownable, ReentrancyGuard {
         bool status,
         address indexed targetContract,
         uint256 votesAmount,
-        uint256 usersVoted
+        uint256 usersVotedTotal,
+        uint256 usersVotedTrue
     );
 
     // Usings
@@ -122,7 +124,8 @@ contract DAO is Ownable, ReentrancyGuard {
             0,
             0,
             0,
-            minumumUserTokens_
+            minumumUserTokens_,
+            0
         );
 
         _proposalsCounter.increment();
@@ -157,13 +160,16 @@ contract DAO is Ownable, ReentrancyGuard {
             "DAO: You have already voted in this proposal"
         );
 
-        answer_
-            ? _proposals[proposalId_].consenting += _users[msg.sender].balance
-            : _proposals[proposalId_].dissenters += _users[msg.sender].balance;
+        if (answer_) {
+            _proposals[proposalId_].consenting += _users[msg.sender].balance;
+            _proposals[proposalId_].usersVotedTrue++;
+        } else {
+            _proposals[proposalId_].dissenters += _users[msg.sender].balance;
+        }
 
         _users[msg.sender].isVoted[proposalId_] = true;
         _users[msg.sender].lastVoteEndTime = _proposals[proposalId_].endTime;
-        _proposals[proposalId_].usersVoted++;
+        _proposals[proposalId_].usersVotedTotal++;
 
         emit Voted(msg.sender, proposalId_, answer_);
     }
@@ -179,13 +185,12 @@ contract DAO is Ownable, ReentrancyGuard {
         Proposal storage proposal = _proposals[proposalId_];
 
         uint256 votesAmount = proposal.consenting + proposal.dissenters;
-
         // The number of users is multiplied by 10 to the 3rd power
         // to eliminate errors, provided that users are less than 10 / 100
         uint256 votersPercentage = _calculateVotersPercentage();
-        uint256 users = proposal.usersVoted * 10**3;
+        uint256 usersTrue = proposal.usersVotedTrue * 10**3;
 
-        if (votesAmount >= _minimumVotes && users >= votersPercentage) {
+        if (votesAmount >= _minimumVotes && usersTrue >= votersPercentage) {
             (bool success, bytes memory returnedData) = proposal
                 .targetContract
                 .call{value: 0}(proposal.encodedMessage);
@@ -196,7 +201,8 @@ contract DAO is Ownable, ReentrancyGuard {
                 true,
                 proposal.targetContract,
                 votesAmount,
-                proposal.usersVoted
+                proposal.usersVotedTotal,
+                proposal.usersVotedTrue
             );
         } else {
             emit Finished(
@@ -204,7 +210,8 @@ contract DAO is Ownable, ReentrancyGuard {
                 false,
                 proposal.targetContract,
                 votesAmount,
-                proposal.usersVoted
+                proposal.usersVotedTotal,
+                proposal.usersVotedTrue
             );
         }
         proposal.isFinished = true;
